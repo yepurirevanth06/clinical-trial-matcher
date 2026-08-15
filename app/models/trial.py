@@ -39,4 +39,11 @@ class Trial(Base, UUIDMixin, TimestampMixin):
         back_populates="trial", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (Index("ix_trials_status_phase", "status", "phase"),)
+    # One composite btree in (created_at, id) order. Two single-column indexes
+    # will NOT serve a row-value comparison as a range scan -- Postgres walks one
+    # index per scan, so it would bitmap-or them and filter. No DESC variant
+    # needed: btrees are walked backwards at identical cost.
+    __table_args__ = (
+        Index("ix_trials_status_phase", "status", "phase"),
+        Index("ix_trials_created_at_id", "created_at", "id"),
+    )
