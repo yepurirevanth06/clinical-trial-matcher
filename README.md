@@ -14,7 +14,7 @@ React + TypeScript · Docker · GitHub Actions
 
 | Week | Scope | State |
 |---|---|---|
-| 1 | Auth, RBAC, models, migrations, CI | ✅ |
+| 1 | Auth, RBAC, models, migrations, patients endpoints, CI | ✅ |
 | 2 | ClinicalTrials.gov sync, search, caching, indexing | ⬜ |
 | 3 | Explainable eligibility rule engine | ⬜ |
 | 4 | React/TS frontend, E2E tests, observability, deploy | ⬜ |
