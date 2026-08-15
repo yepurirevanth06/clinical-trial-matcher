@@ -1,10 +1,14 @@
 import enum
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from app.models.trial import Trial
 
 
 class NodeType(str, enum.Enum):
@@ -51,7 +55,7 @@ class CriteriaNode(Base, UUIDMixin, TimestampMixin):
     value: Mapped[str | None] = mapped_column(String(255))
     raw_text: Mapped[str | None] = mapped_column(String(1000))
 
-    trial: Mapped["Trial"] = relationship(back_populates="criteria_nodes")  # noqa: F821
+    trial: Mapped["Trial"] = relationship(back_populates="criteria_nodes")
     children: Mapped[list["CriteriaNode"]] = relationship(
         back_populates="parent", cascade="all, delete-orphan"
     )

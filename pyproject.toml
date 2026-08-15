@@ -8,3 +8,15 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Query/Depends/Body/Path are meant to be called in argument
+# defaults — that's how the framework reads parameter metadata. B008's
+# mutable-default warning doesn't apply to them.
+extend-immutable-calls = [
+    "fastapi.Query",
+    "fastapi.Depends",
+    "fastapi.Body",
+    "fastapi.Path",
+    "fastapi.Header",
+]
