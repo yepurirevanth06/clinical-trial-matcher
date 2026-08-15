@@ -1,10 +1,14 @@
 import enum
 from datetime import date
+from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, Date, Enum, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from app.models.criteria import CriteriaNode
 
 
 class TrialStatus(str, enum.Enum):
@@ -31,7 +35,7 @@ class Trial(Base, UUIDMixin, TimestampMixin):
     start_date: Mapped[date | None] = mapped_column(Date)
     last_synced_at: Mapped[date | None] = mapped_column(Date)
 
-    criteria_nodes: Mapped[list["CriteriaNode"]] = relationship(  # noqa: F821
+    criteria_nodes: Mapped[list["CriteriaNode"]] = relationship(
         back_populates="trial", cascade="all, delete-orphan"
     )
 
