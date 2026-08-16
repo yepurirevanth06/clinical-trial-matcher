@@ -2,7 +2,7 @@ import enum
 from datetime import date
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, Enum, FetchedValue, Index, String, Text
+from sqlalchemy import Computed, Date, Enum, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,8 +40,20 @@ class Trial(Base, UUIDMixin, TimestampMixin):
     # SQLAlchemy the DB owns this value so it is never included in an INSERT
     # or UPDATE; naming a generated column in a write is a hard error.
     # deferred so a plain select() does not drag the tsvector into memory.
+    # The expression is duplicated from the migration deliberately: create_all
+    # builds the test schema from this model, so a FetchedValue placeholder here
+    # produced a plain nullable tsvector in tests -- never populated, so every
+    # search matched nothing while dev worked fine. Computed() emits the real
+    # GENERATED ALWAYS clause, keeping both schemas identical.
     search_vector: Mapped[str | None] = mapped_column(
-        TSVECTOR, server_default=FetchedValue(), deferred=True
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
+            "setweight(to_tsvector('english', coalesce(brief_summary, '')), 'B') || "
+            "setweight(to_tsvector('english', coalesce(conditions::text, '')), 'C')",
+            persisted=True,
+        ),
+        deferred=True,
     )
 
     criteria_nodes: Mapped[list["CriteriaNode"]] = relationship(
