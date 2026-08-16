@@ -2,7 +2,8 @@ import enum
 from datetime import date
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Date, Enum, Index, String, Text
+from sqlalchemy import Computed, Date, Enum, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -30,10 +31,30 @@ class Trial(Base, UUIDMixin, TimestampMixin):
         Enum(TrialStatus, name="trial_status"), nullable=False, index=True
     )
     phase: Mapped[str | None] = mapped_column(String(32))
-    conditions: Mapped[list] = mapped_column(JSON, default=list)
-    locations: Mapped[list] = mapped_column(JSON, default=list)
+    conditions: Mapped[list] = mapped_column(JSONB, default=list)
+    locations: Mapped[list] = mapped_column(JSONB, default=list)
     start_date: Mapped[date | None] = mapped_column(Date)
     last_synced_at: Mapped[date | None] = mapped_column(Date)
+
+    # GENERATED ALWAYS column -- Postgres computes it. FetchedValue tells
+    # SQLAlchemy the DB owns this value so it is never included in an INSERT
+    # or UPDATE; naming a generated column in a write is a hard error.
+    # deferred so a plain select() does not drag the tsvector into memory.
+    # The expression is duplicated from the migration deliberately: create_all
+    # builds the test schema from this model, so a FetchedValue placeholder here
+    # produced a plain nullable tsvector in tests -- never populated, so every
+    # search matched nothing while dev worked fine. Computed() emits the real
+    # GENERATED ALWAYS clause, keeping both schemas identical.
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
+            "setweight(to_tsvector('english', coalesce(brief_summary, '')), 'B') || "
+            "setweight(to_tsvector('english', coalesce(conditions::text, '')), 'C')",
+            persisted=True,
+        ),
+        deferred=True,
+    )
 
     criteria_nodes: Mapped[list["CriteriaNode"]] = relationship(
         back_populates="trial", cascade="all, delete-orphan"
@@ -46,4 +67,15 @@ class Trial(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (
         Index("ix_trials_status_phase", "status", "phase"),
         Index("ix_trials_created_at_id", "created_at", "id"),
+        # Declared here as well as in the migration. The migration creates them
+        # with raw SQL because op.create_index cannot express an operator
+        # class, but if the model does not know about them, autogenerate reads
+        # them as orphans and writes a migration that drops them.
+        Index("ix_trials_search_vector", "search_vector", postgresql_using="gin"),
+        Index(
+            "ix_trials_conditions",
+            "conditions",
+            postgresql_using="gin",
+            postgresql_ops={"conditions": "jsonb_path_ops"},
+        ),
     )

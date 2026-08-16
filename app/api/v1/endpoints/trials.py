@@ -7,7 +7,7 @@ listing with the ClinicalTrials.gov sync + full-text search.
 import uuid
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.deps import CurrentUser, DbSession, require_role
 from app.core.pagination import (
@@ -20,7 +20,7 @@ from app.core.pagination import (
 from app.errors import BadRequestError, NotFoundError
 from app.models.trial import Trial, TrialStatus
 from app.models.user import Role
-from app.schemas.pagination import Page
+from app.schemas.pagination import OffsetPage, Page
 from app.schemas.trial import TrialRead
 
 router = APIRouter(prefix="/trials", tags=["trials"])
@@ -75,6 +75,45 @@ async def list_trials(
         next_cursor=next_cursor,
         has_more=has_more,
     )
+
+@router.get("/search", response_model=OffsetPage[TrialRead])
+async def search_trials(
+    db: DbSession,
+    _: CurrentUser,
+    q: str = Query(min_length=2, description="Free-text query over title, summary, conditions"),
+    status_filter: TrialStatus | None = Query(default=None, alias="status"),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
+) -> OffsetPage[TrialRead]:
+    # plainto_tsquery, not to_tsquery: to_tsquery demands valid operator syntax
+    # and raises on anything else, so a stray '&' from a search box would be a
+    # 500. plainto_tsquery treats the input as plain words ANDed together.
+    tsquery = func.plainto_tsquery("english", q)
+
+    # ts_rank_cd (cover density) over ts_rank: it accounts for how close the
+    # matched lexemes sit to each other, which matters for multi-word medical
+    # phrases like "type 2 diabetes". The A/B/C weights set in the generated
+    # column are what make a title hit outrank a passing summary mention.
+    rank = func.ts_rank_cd(Trial.search_vector, tsquery)
+
+    stmt = select(Trial).where(Trial.search_vector.op("@@")(tsquery))
+    if status_filter is not None:
+        stmt = stmt.where(Trial.status == status_filter)
+
+    # id is a tiebreak, not decoration: rank ties are common, and without a
+    # deterministic secondary sort the same row can appear on two pages.
+    stmt = stmt.order_by(rank.desc(), Trial.id).offset(offset).limit(limit + 1)
+
+    rows = list(await db.scalars(stmt))
+    has_more = len(rows) > limit
+    rows = rows[:limit]  # drop the sentinel
+
+    return OffsetPage[TrialRead](
+        items=[TrialRead.model_validate(r) for r in rows],
+        offset=offset,
+        has_more=has_more,
+    )
+
 
 @router.get("/{trial_id}")
 async def get_trial(trial_id: uuid.UUID, db: DbSession, _: CurrentUser) -> dict:
