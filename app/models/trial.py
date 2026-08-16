@@ -2,7 +2,8 @@ import enum
 from datetime import date
 from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Date, Enum, Index, String, Text
+from sqlalchemy import Date, Enum, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -30,8 +31,8 @@ class Trial(Base, UUIDMixin, TimestampMixin):
         Enum(TrialStatus, name="trial_status"), nullable=False, index=True
     )
     phase: Mapped[str | None] = mapped_column(String(32))
-    conditions: Mapped[list] = mapped_column(JSON, default=list)
-    locations: Mapped[list] = mapped_column(JSON, default=list)
+    conditions: Mapped[list] = mapped_column(JSONB, default=list)
+    locations: Mapped[list] = mapped_column(JSONB, default=list)
     start_date: Mapped[date | None] = mapped_column(Date)
     last_synced_at: Mapped[date | None] = mapped_column(Date)
 
