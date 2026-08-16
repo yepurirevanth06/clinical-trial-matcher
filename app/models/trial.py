@@ -2,8 +2,8 @@ import enum
 from datetime import date
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, Enum, Index, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Date, Enum, FetchedValue, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -36,6 +36,14 @@ class Trial(Base, UUIDMixin, TimestampMixin):
     start_date: Mapped[date | None] = mapped_column(Date)
     last_synced_at: Mapped[date | None] = mapped_column(Date)
 
+    # GENERATED ALWAYS column -- Postgres computes it. FetchedValue tells
+    # SQLAlchemy the DB owns this value so it is never included in an INSERT
+    # or UPDATE; naming a generated column in a write is a hard error.
+    # deferred so a plain select() does not drag the tsvector into memory.
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR, server_default=FetchedValue(), deferred=True
+    )
+
     criteria_nodes: Mapped[list["CriteriaNode"]] = relationship(
         back_populates="trial", cascade="all, delete-orphan"
     )
@@ -47,4 +55,15 @@ class Trial(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (
         Index("ix_trials_status_phase", "status", "phase"),
         Index("ix_trials_created_at_id", "created_at", "id"),
+        # Declared here as well as in the migration. The migration creates them
+        # with raw SQL because op.create_index cannot express an operator
+        # class, but if the model does not know about them, autogenerate reads
+        # them as orphans and writes a migration that drops them.
+        Index("ix_trials_search_vector", "search_vector", postgresql_using="gin"),
+        Index(
+            "ix_trials_conditions",
+            "conditions",
+            postgresql_using="gin",
+            postgresql_ops={"conditions": "jsonb_path_ops"},
+        ),
     )
