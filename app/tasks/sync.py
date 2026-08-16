@@ -5,9 +5,10 @@ import logging
 from datetime import date
 
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.celery_app import celery_app
-from app.db.session import AsyncSessionLocal
+from app.core.config import settings
 from app.models.trial import Trial
 from app.services.ctgov import ClinicalTrialsClient
 
@@ -15,24 +16,38 @@ logger = logging.getLogger(__name__)
 
 
 async def _sync(condition: str | None, max_pages: int) -> dict:
+    # The engine in app.db.session is a module-level singleton whose asyncpg
+    # pool binds to the first event loop that touches it. uvicorn runs one
+    # long-lived loop, so the API never notices. Celery's sync task wrapper
+    # calls asyncio.run() per task -- a new loop each time -- so by task 2 the
+    # pooled connections belong to a closed loop ("attached to a different
+    # loop"). A task-local engine keeps pool lifetime == loop lifetime.
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
     client = ClinicalTrialsClient()
     seen = 0
     batch: list[dict] = []
 
-    async with AsyncSessionLocal() as session:
-        async for study in client.iter_studies(condition=condition, max_pages=max_pages):
-            study.pop("eligibility_text", None)  # week 3 parses this into the tree
-            study["last_synced_at"] = date.today()
-            batch.append(study)
-            seen += 1
+    try:
+        async with session_factory() as session:
+            async for study in client.iter_studies(condition=condition, max_pages=max_pages):
+                study.pop("eligibility_text", None)  # week 3 parses this into the tree
+                study["last_synced_at"] = date.today()
+                batch.append(study)
+                seen += 1
 
-            if len(batch) >= 200:
+                if len(batch) >= 200:
+                    await _upsert(session, batch)
+                    batch.clear()
+
+            if batch:
                 await _upsert(session, batch)
-                batch.clear()
-
-        if batch:
-            await _upsert(session, batch)
-        await session.commit()
+            await session.commit()
+    finally:
+        # Must dispose inside the loop that created the pool.
+        await engine.dispose()
 
     logger.info("ctgov sync complete: %s studies", seen)
     return {"studies_seen": seen}
