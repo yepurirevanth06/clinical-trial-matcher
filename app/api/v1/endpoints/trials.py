@@ -10,45 +10,71 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 
 from app.core.deps import CurrentUser, DbSession, require_role
-from app.errors import NotFoundError
+from app.core.pagination import (
+    DEFAULT_LIMIT,
+    MAX_LIMIT,
+    Cursor,
+    InvalidCursorError,
+    apply_keyset,
+)
+from app.errors import BadRequestError, NotFoundError
 from app.models.trial import Trial, TrialStatus
 from app.models.user import Role
+from app.schemas.pagination import Page
+from app.schemas.trial import TrialRead
 
 router = APIRouter(prefix="/trials", tags=["trials"])
 
 
-@router.get("")
+@router.get("", response_model=Page[TrialRead])
 async def list_trials(
     db: DbSession,
     _: CurrentUser,
     status_filter: TrialStatus | None = Query(default=None, alias="status"),
-    limit: int = Query(default=20, ge=1, le=100),
-) -> dict:
-    stmt = select(Trial).order_by(Trial.created_at.desc()).limit(limit + 1)
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    cursor: str | None = Query(default=None, description="Opaque token from next_cursor"),
+) -> Page[TrialRead]:
+    try:
+        parsed = Cursor.decode(cursor) if cursor else None
+    except InvalidCursorError as exc:
+        # 400, not 422: the cursor is structurally a valid string, so FastAPI's
+        # validation passes. It is the decoded contents that are bad.
+        raise BadRequestError("invalid pagination cursor") from exc
+
+    stmt = select(Trial)
     if status_filter is not None:
         stmt = stmt.where(Trial.status == status_filter)
 
+    # Filters must stay constant across a pagination run. The cursor encodes a
+    # position, not a query -- changing `status` mid-walk yields a coherent but
+    # meaningless traversal. Stricter APIs hash the filter set into the cursor
+    # and reject a mismatch; we document the contract instead.
+    stmt = apply_keyset(
+        stmt,
+        sort_col=Trial.created_at,
+        tiebreak_col=Trial.id,
+        cursor=parsed,
+        limit=limit,
+    )
+
     rows = list(await db.scalars(stmt))
     has_more = len(rows) > limit
-    items = rows[:limit]
+    rows = rows[:limit]  # drop the sentinel
 
-    # TODO(week 2): swap to keyset pagination on (created_at, id).
-    return {
-        "items": [
-            {
-                "id": str(t.id),
-                "nct_id": t.nct_id,
-                "title": t.title,
-                "status": t.status.value,
-                "phase": t.phase,
-                "conditions": t.conditions,
-            }
-            for t in items
-        ],
-        "has_more": has_more,
-        "next_cursor": None,
-    }
+    # Built AFTER the slice. Build it before and the cursor points at the first
+    # row of the NEXT page rather than the last row of this one, so every page
+    # silently loses its first row -- no error, just missing data.
+    next_cursor = (
+        Cursor(created_at=rows[-1].created_at, id=rows[-1].id).encode()
+        if has_more and rows
+        else None
+    )
 
+    return Page[TrialRead](
+        items=[TrialRead.model_validate(r) for r in rows],
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
 
 @router.get("/{trial_id}")
 async def get_trial(trial_id: uuid.UUID, db: DbSession, _: CurrentUser) -> dict:

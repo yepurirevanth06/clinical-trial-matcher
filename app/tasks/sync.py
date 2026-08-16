@@ -53,6 +53,7 @@ async def _upsert(session, rows: list[dict]) -> None:
             "title": stmt.excluded.title,
             "brief_summary": stmt.excluded.brief_summary,
             "status": stmt.excluded.status,
+            "start_date": stmt.excluded.start_date,
             "phase": stmt.excluded.phase,
             "conditions": stmt.excluded.conditions,
             "locations": stmt.excluded.locations,

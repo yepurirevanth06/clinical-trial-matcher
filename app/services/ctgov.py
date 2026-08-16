@@ -93,6 +93,7 @@ def normalise(study: dict) -> dict | None:
         "title": _dig(proto, "identificationModule", "briefTitle", default=""),
         "brief_summary": _dig(proto, "descriptionModule", "briefSummary"),
         "status": status,
+        "start_date": start_date,
         "phase": ", ".join(phases) if phases else None,
         "conditions": _dig(proto, "conditionsModule", "conditions", default=[]),
         "locations": [
