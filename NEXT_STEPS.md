@@ -45,3 +45,43 @@ Do not skip this. You need to be able to defend every line in an interview.
 5. Why `expire_on_commit=False` on the session maker?
 
 Answer all five out loud before you start week 2.
+
+## Week 2 perf numbers (measured 2026-08-16)
+
+For the README performance section. All on the trials table, docker compose.
+
+| Query | Rows in table | Plan | Time |
+|---|---|---|---|
+| `ILIKE '%insulin%'` on title + brief_summary | 1000 | Seq Scan | 9.513 ms |
+| `search_vector @@ plainto_tsquery('insulin')` | 1000 | Bitmap Index Scan | 0.363 ms |
+| `'type 2 diabetes'` + ts_rank_cd order, limit 21 | 2103 | Seq Scan (planner's choice) | 19.0 ms median |
+| same, `enable_seqscan = off` | 2103 | Bitmap Index Scan | 14.6 ms median |
+| same, `random_page_cost = 1.1` | 2103 | Bitmap Index Scan (planner switched) | 14.5 ms |
+
+Medians are from 3 runs each; individual samples 19.0/19.6/17.6 and 13.6/14.9/14.6.
+
+### The finding
+At 22% selectivity (470/2103) the planner chose a seq scan that was ~23%
+slower than the index path. Cause was cost model, not the index: it priced
+the bitmap path at 1265 vs 431 for seq scan, driven by the GIN scan's 1016
+startup cost. Default `random_page_cost = 4.0` assumes rotational media;
+at 1.1 (SSD-realistic) the bitmap path priced at 429 and the planner picked
+it unprompted.
+
+Caveat for the write-up: do NOT present 1.1 as "the fix". It is correct for
+SSD and wrong for spinning disks or network-attached volumes. Framing is
+"identified the parameter, measured its effect, would set it per deployment".
+
+Also worth noting: row estimate was 108 vs 470 actual even after ANALYZE.
+Postgres has no good selectivity stats for tsvector matches.
+
+### Benchmarking gotcha hit along the way
+`LIMIT` without `ORDER BY` lets the planner stop early, so it measures time
+to first N rows, not query completion. An early `insulin` measurement looked
+fast for exactly this reason and was thrown out.
+
+## Open items
+1. README performance section (numbers above, highest value)
+2. Cache tests -- zero coverage; hit/miss JSON equivalence + version-bump invalidation
+3. conftest uses Base.metadata.create_all, not `alembic upgrade head`. Root cause
+   of the search_vector drift bug. The jsonb_path_ops index has the same exposure.
