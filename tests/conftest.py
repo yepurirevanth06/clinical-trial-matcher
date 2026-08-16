@@ -1,3 +1,5 @@
+import os
+from app.core.config import settings
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -9,13 +11,21 @@ from app.db.registry import Base
 from app.db.session import get_db
 from app.main import app
 
-TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
+# Tests run on the SAME engine as production. Keyset pagination depends on
+# Postgres-specific semantics -- bytewise uuid ordering, now() as the
+# TRANSACTION timestamp, and the composite btree -- none of which SQLite
+# reproduces. Week 2 adds to_tsvector, which SQLite cannot run at all.
+TEST_DB_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    f"postgresql+asyncpg://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/ctm_test",
+)
 
 
 @pytest.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
+    engine = create_async_engine(TEST_DB_URL)
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
