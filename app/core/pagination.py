@@ -6,7 +6,7 @@ import base64
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, TypeVar
 
 from sqlalchemy import Select, literal, tuple_
@@ -62,7 +62,7 @@ class Cursor:
 
         if created_at.tzinfo is None:
             # Column is TIMESTAMPTZ; asyncpg raises on aware/naive mismatch.
-            created_at = created_at.replace(tzinfo=timezone.utc)
+            created_at = created_at.replace(tzinfo=UTC)
         return cls(created_at=created_at, id=row_id)
 
 

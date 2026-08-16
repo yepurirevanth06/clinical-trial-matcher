@@ -18,10 +18,10 @@ from app.core.pagination import (
     apply_keyset,
 )
 from app.errors import BadRequestError, NotFoundError
-from app.schemas.pagination import Page
-from app.schemas.trial import TrialRead
 from app.models.trial import Trial, TrialStatus
 from app.models.user import Role
+from app.schemas.pagination import Page
+from app.schemas.trial import TrialRead
 
 router = APIRouter(prefix="/trials", tags=["trials"])
 

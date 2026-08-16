@@ -1,11 +1,11 @@
 import os
-from app.core.config import settings
 from collections.abc import AsyncGenerator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.config import settings
 from app.core.deps import get_current_user  # noqa: F401  (kept for override examples)
 from app.db.registry import Base
 from app.db.session import get_db
