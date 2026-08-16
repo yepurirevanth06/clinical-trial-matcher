@@ -20,12 +20,20 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Same default as app.core.celery_app, which reads os.getenv directly.
+    # Both point at the compose service hostname, not localhost.
+    REDIS_URL: str = "redis://redis:6379/0"
+
     @property
     def database_url(self) -> str:
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
+
+    @property
+    def redis_url(self) -> str:
+        return self.REDIS_URL
 
 
 @lru_cache

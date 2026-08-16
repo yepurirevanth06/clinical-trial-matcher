@@ -54,3 +54,14 @@ def user_payload() -> dict:
         "password": "a-sufficiently-long-password",
         "full_name": "Test Coordinator",
     }
+
+
+@pytest.fixture(autouse=True)
+async def _reset_cache_client():
+    """Each test gets its own event loop, so the cached Redis client from the
+    previous test is bound to a dead one. Reset before and after."""
+    from app.core import cache
+
+    await cache.aclose()
+    yield
+    await cache.aclose()
