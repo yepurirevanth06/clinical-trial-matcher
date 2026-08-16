@@ -7,6 +7,7 @@ from datetime import date
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.cache import bump_version_sync
 from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.models.trial import Trial
@@ -81,7 +82,12 @@ async def _upsert(session, rows: list[dict]) -> None:
 @celery_app.task(name="sync_trials", bind=True, max_retries=3)
 def sync_trials(self, condition: str | None = None, max_pages: int = 10) -> dict:
     try:
-        return asyncio.run(_sync(condition, max_pages))
+        result = asyncio.run(_sync(condition, max_pages))
+        # After the sync, not inside _sync: if the crawl raises partway, the
+        # cache should still serve the old results rather than being
+        # invalidated for work that never landed.
+        result["cache_version"] = bump_version_sync()
+        return result
     except Exception as exc:
         logger.exception("sync_trials failed")
         raise self.retry(exc=exc, countdown=60) from exc

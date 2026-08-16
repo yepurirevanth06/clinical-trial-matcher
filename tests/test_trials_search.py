@@ -54,7 +54,12 @@ async def test_title_outranks_summary(client, db_session):
     Drop the weights and both rows tie, so this is the test that catches it."""
     headers = await _auth(client, db_session, "rank@x.com")
     await _mk(db_session, tag="0001", title="Metformin dosing study")
-    await _mk(db_session, tag="0002", title="Unrelated study", summary="Uses metformin as a comparator.")
+    await _mk(
+        db_session,
+        tag="0002",
+        title="Unrelated study",
+        summary="Uses metformin as a comparator.",
+    )
 
     body = await _search(client, headers, "metformin")
     assert len(body["items"]) == 2

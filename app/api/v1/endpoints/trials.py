@@ -9,6 +9,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 
+from app.core.cache import get_json, get_version, make_key, set_json
 from app.core.deps import CurrentUser, DbSession, require_role
 from app.core.pagination import (
     DEFAULT_LIMIT,
@@ -88,6 +89,16 @@ async def search_trials(
     # plainto_tsquery, not to_tsquery: to_tsquery demands valid operator syntax
     # and raises on anything else, so a stray '&' from a search box would be a
     # 500. plainto_tsquery treats the input as plain words ANDed together.
+    # Key includes the version counter, so a sync INCR makes every previously
+    # cached entry unreachable in one operation -- no KEYS scan, which is
+    # O(keyspace) and blocks Redis's single thread.
+    version = await get_version()
+    key = make_key(version, q=q, status=status_filter, limit=limit, offset=offset)
+    if (hit := await get_json(key)) is not None:
+        # Cached as the serialised page, so a hit skips the query AND the
+        # Pydantic validation of every row.
+        return OffsetPage[TrialRead].model_validate(hit)
+
     tsquery = func.plainto_tsquery("english", q)
 
     # ts_rank_cd (cover density) over ts_rank: it accounts for how close the
@@ -108,11 +119,13 @@ async def search_trials(
     has_more = len(rows) > limit
     rows = rows[:limit]  # drop the sentinel
 
-    return OffsetPage[TrialRead](
+    page = OffsetPage[TrialRead](
         items=[TrialRead.model_validate(r) for r in rows],
         offset=offset,
         has_more=has_more,
     )
+    await set_json(key, page.model_dump())
+    return page
 
 
 @router.get("/{trial_id}")
