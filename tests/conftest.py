@@ -20,6 +20,16 @@ TEST_DB_URL = os.getenv(
     f"postgresql+asyncpg://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/ctm_test",
 )
 
+# Fail loudly rather than operate on a non-test database. The fixtures run
+# DDL, and during development a schema-drop helper reached the dev database
+# through a different code path (alembic env.py resolving its own URL from
+# settings) and destroyed it. Cheap insurance against any future path doing
+# the same.
+if not TEST_DB_URL.rstrip("/").endswith("_test"):
+    raise RuntimeError(
+        f"tests refuse to run against a database not ending in _test: {TEST_DB_URL}"
+    )
+
 
 @pytest.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
