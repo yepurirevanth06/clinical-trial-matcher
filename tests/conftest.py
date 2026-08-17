@@ -59,9 +59,21 @@ def user_payload() -> dict:
 @pytest.fixture(autouse=True)
 async def _reset_cache_client():
     """Each test gets its own event loop, so the cached Redis client from the
-    previous test is bound to a dead one. Reset before and after."""
+    previous test is bound to a dead one. Reset before and after.
+
+    FLUSHDB because the cache tests assert things like "this is the first
+    request for term X" -- a claim about global Redis state. Distinct search
+    terms isolate tests within a run but not across runs: cached pages and the
+    version counter both persist, so a second `pytest` would read run 1's
+    entries and fail. Flushing also puts get_version() at a known 0.
+
+    Note this wipes db 0, which Celery also uses as its broker. Fine in CI and
+    for a normal test run; it would drop queued tasks if a real sync happened
+    to be pending locally.
+    """
     from app.core import cache
 
     await cache.aclose()
+    await cache.get_client().flushdb()
     yield
     await cache.aclose()
