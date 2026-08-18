@@ -13,12 +13,17 @@ up the tree.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from datetime import date
 from enum import Enum
 from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.criteria import CriteriaNode, NodeType, Operator
 from app.models.patient import Patient
@@ -236,3 +241,42 @@ def evaluate(node: CriteriaNode, patient: Patient, as_of: date | None = None) ->
         result.reason = f"exclusion inverted: {result.reason}"
 
     return result
+
+
+async def load_tree(session: AsyncSession, trial_id: uuid.UUID) -> CriteriaNode | None:
+    """Load a trial's criteria tree in one query.
+
+    selectinload would need one .selectinload() per level of nesting and blows
+    up on anything deeper -- async SQLAlchemy raises rather than lazy-loading.
+    Fetching every node for the trial flat (ix_criteria_nodes_trial_id covers
+    it) and wiring parents to children in Python is depth-independent and stays
+    one round trip.
+    """
+    rows = list(
+        await session.scalars(
+            select(CriteriaNode)
+            .where(CriteriaNode.trial_id == trial_id)
+            .order_by(CriteriaNode.ordering)
+            .options(
+                selectinload(CriteriaNode.children, recursion_depth=-1)
+            )
+        )
+    )
+    if not rows:
+        return None
+
+    by_id = {n.id: n for n in rows}
+    root = None
+    for node in rows:
+        # Overwrite the relationship collection rather than appending: these
+        # objects are session-attached, so the attribute may already be
+        # populated from the identity map.
+        node.children = []
+    for node in rows:
+        if node.parent_id is None:
+            root = node
+        else:
+            parent = by_id.get(node.parent_id)
+            if parent is not None:
+                parent.children.append(node)
+    return root
