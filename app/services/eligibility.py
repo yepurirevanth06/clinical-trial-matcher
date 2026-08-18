@@ -97,8 +97,14 @@ def _as_number(raw: str) -> float | None:
         return None
 
 
-def compare(op: Operator, actual: Any, expected: str) -> tuple[Verdict, str]:
+def compare(op: Operator | None, actual: Any, expected: str) -> tuple[Verdict, str]:
     """Apply one operator. Returns the verdict and a human-readable reason."""
+    # operator is nullable on the model because branch nodes do not carry one.
+    # A leaf without an operator is malformed data, so surface it for review
+    # rather than crashing or guessing.
+    if op is None:
+        return Verdict.UNKNOWN, "leaf node has no operator"
+
     if actual is _MISSING:
         return Verdict.UNKNOWN, "patient has no value recorded for this field"
 
